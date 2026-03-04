@@ -52,6 +52,7 @@ static runtime_config_t cfg = {
 };
 
 static uint32_t csi_seq = 0;
+static void wifi_csi_cb(void *ctx, wifi_csi_info_t *info);
 
 static void load_runtime_config(void)
 {
@@ -140,8 +141,118 @@ static void wifi_init(void)
         .manu_scale = false,
         .shift = false,
     };
+    (void)csi_cfg;
+}
 
-    ESP_ERROR_CHECK(esp_wifi_set_csi_config(&csi_cfg));
+static esp_err_t apply_csi_config_profiles(void)
+{
+    const wifi_csi_config_t profiles[] = {
+        /* Router-friendly profile from Espressif esp-csi examples. */
+        {
+            .lltf_en = true,
+            .htltf_en = false,
+            .stbc_htltf2_en = false,
+            .ltf_merge_en = true,
+            .channel_filter_en = true,
+            .manu_scale = true,
+            .shift = 1,
+            .dump_ack_en = false,
+        },
+        /* Generic profile from esp-csi get-started. */
+        {
+            .lltf_en = true,
+            .htltf_en = true,
+            .stbc_htltf2_en = true,
+            .ltf_merge_en = true,
+            .channel_filter_en = true,
+            .manu_scale = false,
+            .shift = 0,
+            .dump_ack_en = false,
+        },
+        /* Conservative fallback profile. */
+        {
+            .lltf_en = true,
+            .htltf_en = true,
+            .stbc_htltf2_en = false,
+            .ltf_merge_en = false,
+            .channel_filter_en = true,
+            .manu_scale = false,
+            .shift = 0,
+            .dump_ack_en = false,
+        },
+    };
+
+    const char *profile_names[] = {
+        "router-friendly",
+        "generic",
+        "fallback",
+    };
+
+    esp_err_t last_err = ESP_FAIL;
+    for (size_t i = 0; i < sizeof(profiles) / sizeof(profiles[0]); i++) {
+        last_err = esp_wifi_set_csi_config(&profiles[i]);
+        if (last_err == ESP_OK) {
+            ESP_LOGI(TAG, "CSI config applied: %s profile", profile_names[i]);
+            return ESP_OK;
+        }
+        ESP_LOGW(TAG, "CSI config profile '%s' failed: %s", profile_names[i], esp_err_to_name(last_err));
+    }
+
+    return last_err;
+}
+
+static esp_err_t configure_csi_pipeline(void)
+{
+    esp_wifi_set_ps(WIFI_PS_NONE);
+
+    wifi_ap_record_t ap_info = {0};
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        ESP_LOGI(TAG, "Connected AP BSSID: %02x:%02x:%02x:%02x:%02x:%02x, ch=%u",
+                 ap_info.bssid[0], ap_info.bssid[1], ap_info.bssid[2],
+                 ap_info.bssid[3], ap_info.bssid[4], ap_info.bssid[5],
+                 ap_info.primary);
+    }
+
+    esp_err_t err = esp_wifi_set_promiscuous(false);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "esp_wifi_set_promiscuous(false) failed: %s", esp_err_to_name(err));
+    }
+
+    err = apply_csi_config_profiles();
+    if (err != ESP_OK) {
+        err = esp_wifi_set_promiscuous(true);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "esp_wifi_set_promiscuous(true) failed: %s", esp_err_to_name(err));
+            return err;
+        }
+        err = apply_csi_config_profiles();
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "All CSI config profiles failed after enabling promiscuous mode");
+            return err;
+        }
+    }
+
+    /* CSI callbacks are most reliable with promiscuous mode enabled. */
+    err = esp_wifi_set_promiscuous(true);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to enable promiscuous mode for CSI: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    err = esp_wifi_set_csi_rx_cb(wifi_csi_cb, NULL);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_wifi_set_csi_rx_cb failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    err = esp_wifi_set_csi(true);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_wifi_set_csi(true) failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    ESP_LOGI(TAG, "CSI pipeline enabled");
+    return ESP_OK;
 }
 
 static void wifi_csi_cb(void *ctx, wifi_csi_info_t *info)
@@ -301,8 +412,11 @@ void app_main(void)
         return;
     }
 
-    ESP_ERROR_CHECK(esp_wifi_set_csi_rx_cb(wifi_csi_cb, NULL));
-    ESP_ERROR_CHECK(esp_wifi_set_csi(true));
+    esp_err_t csi_err = configure_csi_pipeline();
+    if (csi_err != ESP_OK) {
+        ESP_LOGE(TAG, "CSI pipeline initialization failed, stopping app_main");
+        return;
+    }
 
     xTaskCreatePinnedToCore(csi_udp_stream_task, "csi_udp", 4096, NULL, 5, NULL, 1);
     xTaskCreatePinnedToCore(traffic_generator_task, "traffic", 2048, NULL, 4, NULL, 0);
