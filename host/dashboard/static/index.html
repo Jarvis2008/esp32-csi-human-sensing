@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CSI Sentinel Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/dashboard/styles.css" />
+  </head>
+  <body>
+    <div class="bg-grid"></div>
+    <main class="layout">
+      <header class="header">
+        <div>
+          <p class="overline">ESP32 CSI SENTINEL</p>
+          <h1>Live Presence + Activity</h1>
+          <p class="subtitle">Real-time telemetry from CSI_FRAME_V2 ingest stream</p>
+        </div>
+        <div id="healthBadge" class="badge badge-warn">connecting...</div>
+      </header>
+
+      <section class="cards">
+        <article class="card highlight">
+          <h2>Current State</h2>
+          <div class="state-row">
+            <span class="label">Presence</span>
+            <span id="presenceValue" class="pill">unknown</span>
+          </div>
+          <div class="state-row">
+            <span class="label">Activity</span>
+            <span id="activityValue" class="pill">unknown</span>
+          </div>
+          <div class="state-row">
+            <span class="label">Confidence</span>
+            <span id="confidenceValue" class="mono">0.00</span>
+          </div>
+        </article>
+
+        <article class="card">
+          <h2>Ingest Health</h2>
+          <div class="kv"><span>Packets received</span><span id="packetsReceived" class="mono">0</span></div>
+          <div class="kv"><span>Packets parsed</span><span id="packetsParsed" class="mono">0</span></div>
+          <div class="kv"><span>Invalid packets</span><span id="packetsInvalid" class="mono">0</span></div>
+          <div class="kv"><span>Dropped estimate</span><span id="droppedEstimate" class="mono">0</span></div>
+          <div class="kv"><span>Parser error rate</span><span id="parserErrorRate" class="mono">0.000</span></div>
+        </article>
+
+        <article class="card">
+          <h2>Node Summary</h2>
+          <div id="nodeList" class="node-list mono">No node packets yet.</div>
+        </article>
+      </section>
+
+      <section class="charts">
+        <article class="card chart-card">
+          <h2>Motion Index</h2>
+          <canvas id="motionChart" width="800" height="220"></canvas>
+        </article>
+        <article class="card chart-card">
+          <h2>Confidence</h2>
+          <canvas id="confidenceChart" width="800" height="220"></canvas>
+        </article>
+      </section>
+    </main>
+
+    <script src="/dashboard/app.js"></script>
+  </body>
+</html>

@@ -1,8 +1,22 @@
 # Dashboard
 
-Phase-1 dashboard integration target:
-- Pull `/api/status`, `/api/state`, `/api/metrics`
-- Subscribe to `/ws/live`
-- Show packet health + activity timeline + confidence
+Live browser dashboard for phase-1 CSI sensing.
 
-Implementation can be standalone web app or embedded FastAPI static bundle.
+## Entry Points
+- `/` -> dashboard index
+- `/dashboard/*` -> static assets
+- `/api/status`, `/api/state`, `/api/metrics`, `/api/nodes`
+- `/ws/live`
+
+## Run
+```bash
+uv run python -m host.ingest.service --bind 0.0.0.0 --port 8000 --udp-port 3334
+```
+
+Open: `http://localhost:8000`
+
+## UI Sections
+- Current inferred state
+- Packet/parser health
+- Node-level counters
+- Motion/confidence trend charts

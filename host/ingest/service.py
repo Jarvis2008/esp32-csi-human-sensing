@@ -10,7 +10,9 @@ import threading
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 from host.ingest.packet import FrameParseError, parse_csi_frame_v2
@@ -142,6 +144,17 @@ class CSIIngestService:
 
 service: CSIIngestService | None = None
 app = FastAPI(title="ESP32 CSI Human Sensing", version="0.1.0")
+DASHBOARD_STATIC_DIR = Path(__file__).resolve().parents[1] / "dashboard" / "static"
+
+if DASHBOARD_STATIC_DIR.exists():
+    app.mount("/dashboard", StaticFiles(directory=str(DASHBOARD_STATIC_DIR), html=True), name="dashboard")
+
+
+@app.get("/")
+def dashboard_home() -> FileResponse:
+    if DASHBOARD_STATIC_DIR.exists():
+        return FileResponse(DASHBOARD_STATIC_DIR / "index.html")
+    raise HTTPException(status_code=404, detail="dashboard static directory not found")
 
 
 @app.get("/api/status")
