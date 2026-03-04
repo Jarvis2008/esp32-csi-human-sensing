@@ -1,15 +1,29 @@
 # ESP32 Node Firmware (Phase 1)
 
-This folder contains the fresh firmware implementation plan for `CSI_FRAME_V2`.
+Fresh firmware for CSI capture and `CSI_FRAME_V2` UDP streaming.
 
-## Targets
-- Capture CSI callback frames
-- Push frames to ring buffer
-- Stream `CSI_FRAME_V2` over UDP
-- Runtime tuning via NVS
+## Features
+- WiFi STA connect (credentials from Kconfig or NVS)
+- CSI callback capture + ring-buffer decoupling
+- UDP stream of `CSI_FRAME_V2`
+- Runtime config through NVS (`csi_cfg` namespace)
 
-## Expected build flow
+## NVS Keys (`csi_cfg`)
+- `ssid` (string)
+- `password` (string)
+- `target_ip` (string, e.g. `192.168.1.20` or `255.255.255.255`)
+- `target_port` (u16)
+- `node_id` (u16)
+- `capture_ms` (u16)
+- `traffic_ms` (u16)
+
+## Build + Flash
 ```bash
 source /Users/jarvis/Work/esp-idf-v5.5.2/export.sh
+cd firmware/esp32_node
+idf.py set-target esp32
 idf.py -p /dev/cu.usbserial-0001 build flash monitor
 ```
+
+## Packet Contract
+See `data/contracts/csi_frame_v2.md` in the repo root.

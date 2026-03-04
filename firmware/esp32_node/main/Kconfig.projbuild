@@ -1,0 +1,35 @@
+menu "CSI Node Configuration"
+
+config CSI_WIFI_SSID
+    string "WiFi SSID"
+    default ""
+
+config CSI_WIFI_PASSWORD
+    string "WiFi Password"
+    default ""
+
+config CSI_DEFAULT_TARGET_IP
+    string "Default target IP"
+    default "255.255.255.255"
+
+config CSI_DEFAULT_TARGET_PORT
+    int "Default target port"
+    range 1 65535
+    default 3334
+
+config CSI_DEFAULT_NODE_ID
+    int "Default node ID"
+    range 0 32767
+    default 1
+
+config CSI_DEFAULT_CAPTURE_INTERVAL_MS
+    int "Default capture interval (ms)"
+    range 0 1000
+    default 20
+
+config CSI_DEFAULT_TRAFFIC_GEN_INTERVAL_MS
+    int "Default traffic generator interval (ms)"
+    range 0 5000
+    default 50
+
+endmenu
