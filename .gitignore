@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.env
+.DS_Store
+*.log
+*.tmp
+*.swp
+data/sessions/*
+!data/sessions/.gitkeep
+*.npz
+*.parquet
+*.onnx
+*.pkl
