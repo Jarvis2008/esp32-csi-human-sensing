@@ -17,12 +17,11 @@ Fresh implementation for ESP32 CSI-based human presence and activity sensing.
 - `tests/replay/`: packet parser and replay stability tests
 - `docs/`: runbooks and protocols
 
-## Quick Start (Host)
+## Quick Start (Host via uv)
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python -m host.ingest.service --bind 0.0.0.0 --port 8000 --udp-port 3334
+uv sync --group dev
+uv run python -m host.ingest.service --bind 0.0.0.0 --port 8000 --udp-port 3334
+uv run pytest -q tests/replay
 ```
 
 ## ESP-IDF Flow

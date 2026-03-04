@@ -1,0 +1,18 @@
+[project]
+name = "esp32-csi-human-sensing"
+version = "0.1.0"
+description = "ESP32 CSI human sensing pipeline"
+requires-python = ">=3.9"
+dependencies = [
+  "fastapi==0.118.0",
+  "uvicorn==0.35.0",
+  "numpy==2.0.2",
+]
+
+[dependency-groups]
+dev = [
+  "pytest==8.4.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
