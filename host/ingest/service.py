@@ -10,26 +10,33 @@ import threading
 import time
 from pathlib import Path
 
-import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import uvicorn
 
 from host.ingest.packet import FrameParseError, parse_csi_frame_v2
+from host.ingest.session import FrameSnapshot, SessionRecorder
 from host.ingest.state import RuntimeMetrics
 from host.inference.pipeline import InferencePipeline
 
 
 class CSIIngestService:
-    def __init__(self, udp_port: int, session_dir: Path) -> None:
+    def __init__(
+        self,
+        udp_port: int,
+        session_dir: Path,
+        window_size: int,
+        max_frames: int,
+    ) -> None:
         self.udp_port = udp_port
         self.session_dir = session_dir
         self.metrics = RuntimeMetrics()
-        self.pipeline = InferencePipeline(window_size=40)
+        self.pipeline = InferencePipeline(window_size=window_size)
+        self.recorder = SessionRecorder(max_frames=max_frames)
         self._running = False
         self._clients: set[WebSocket] = set()
         self._state_lock = threading.Lock()
         self._last_state = {"presence": "unknown", "activity": "unknown", "confidence": 0.0}
-        self._frame_buffer: list[tuple[int, ...]] = []
+        self._udp_thread: threading.Thread | None = None
 
     def run_udp_listener(self) -> None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -45,21 +52,35 @@ class CSIIngestService:
             except OSError:
                 break
 
-            self.metrics.packets_received += 1
-            self.metrics.last_packet_time = time.time()
+            with self._state_lock:
+                self.metrics.packets_received += 1
+                self.metrics.last_packet_time = time.time()
+
             try:
                 frame = parse_csi_frame_v2(packet)
-                self.metrics.packets_parsed += 1
-                if self.metrics.last_seq >= 0 and frame.seq > self.metrics.last_seq + 1:
-                    self.metrics.dropped_estimate += frame.seq - self.metrics.last_seq - 1
-                self.metrics.last_seq = frame.seq
-                self._frame_buffer.append(frame.csi_iq)
-                state = self.pipeline.add_frame(frame.csi_iq)
-                if state:
-                    with self._state_lock:
-                        self._last_state = state
             except FrameParseError:
-                self.metrics.packets_invalid += 1
+                with self._state_lock:
+                    self.metrics.register_invalid()
+                continue
+
+            with self._state_lock:
+                self.metrics.register_frame(frame.seq, frame.node_id)
+                self.recorder.add_frame(
+                    FrameSnapshot(
+                        seq=frame.seq,
+                        timestamp_us=frame.timestamp_us,
+                        node_id=frame.node_id,
+                        rssi=frame.rssi,
+                        channel=frame.channel,
+                        csi_iq=frame.csi_iq,
+                    )
+                )
+
+                state = self.pipeline.add_frame(frame.csi_iq)
+                if self.pipeline.last_features:
+                    self.recorder.add_feature_window(self.pipeline.last_features)
+                if state:
+                    self._last_state = state
 
         sock.close()
 
@@ -75,8 +96,18 @@ class CSIIngestService:
                         "packets_parsed": self.metrics.packets_parsed,
                         "packets_invalid": self.metrics.packets_invalid,
                         "dropped_estimate": self.metrics.dropped_estimate,
+                        "error_rate": self.metrics.parser_error_rate(),
                     },
                     "features": self.pipeline.last_features,
+                    "nodes": {
+                        node_id: {
+                            "packets": stats.packets,
+                            "last_seq": stats.last_seq,
+                            "dropped_estimate": stats.dropped_estimate,
+                            "last_seen_time": stats.last_seen_time,
+                        }
+                        for node_id, stats in self.metrics.node_stats.items()
+                    },
                 }
             stale: list[WebSocket] = []
             for client in self._clients:
@@ -87,16 +118,26 @@ class CSIIngestService:
             for client in stale:
                 self._clients.discard(client)
 
-    def stop(self) -> None:
-        self._running = False
-        self.persist_session()
+    def start(self) -> None:
+        self._udp_thread = threading.Thread(target=self.run_udp_listener, daemon=True)
+        self._udp_thread.start()
 
-    def persist_session(self) -> None:
-        self.session_dir.mkdir(parents=True, exist_ok=True)
-        session_id = int(time.time())
-        raw_path = self.session_dir / f"raw_frames_{session_id}.npz"
-        if self._frame_buffer:
-            np.savez(raw_path, frames=np.asarray(self._frame_buffer, dtype=object))
+    def stop(self) -> dict[str, str]:
+        self._running = False
+        if self._udp_thread:
+            self._udp_thread.join(timeout=2.0)
+
+        with self._state_lock:
+            metrics_snapshot = {
+                "packets_received": self.metrics.packets_received,
+                "packets_parsed": self.metrics.packets_parsed,
+                "packets_invalid": self.metrics.packets_invalid,
+                "dropped_estimate": self.metrics.dropped_estimate,
+                "error_rate": self.metrics.parser_error_rate(),
+            }
+            last_state = dict(self._last_state)
+
+        return self.recorder.persist(self.session_dir, metrics_snapshot, last_state)
 
 
 service: CSIIngestService | None = None
@@ -106,30 +147,52 @@ app = FastAPI(title="ESP32 CSI Human Sensing", version="0.1.0")
 @app.get("/api/status")
 def get_status() -> dict[str, object]:
     assert service is not None
-    return {
-        "uptime_sec": service.metrics.uptime_sec(),
-        "packets_received": service.metrics.packets_received,
-        "packets_parsed": service.metrics.packets_parsed,
-        "packets_invalid": service.metrics.packets_invalid,
-        "dropped_estimate": service.metrics.dropped_estimate,
-        "last_packet_age_sec": max(0.0, time.time() - service.metrics.last_packet_time) if service.metrics.last_packet_time else None,
-    }
+    with service._state_lock:
+        last_packet_age = max(0.0, time.time() - service.metrics.last_packet_time) if service.metrics.last_packet_time else None
+        return {
+            "uptime_sec": service.metrics.uptime_sec(),
+            "packets_received": service.metrics.packets_received,
+            "packets_parsed": service.metrics.packets_parsed,
+            "packets_invalid": service.metrics.packets_invalid,
+            "dropped_estimate": service.metrics.dropped_estimate,
+            "parser_error_rate": service.metrics.parser_error_rate(),
+            "last_packet_age_sec": last_packet_age,
+            "frames_buffered": service.recorder.frame_count(),
+        }
 
 
 @app.get("/api/state")
 def get_state() -> dict[str, object]:
     assert service is not None
-    return service.pipeline.last_state
+    with service._state_lock:
+        return dict(service._last_state)
 
 
 @app.get("/api/metrics")
 def get_metrics() -> dict[str, object]:
     assert service is not None
-    return {
-        "features": service.pipeline.last_features,
-        "packets_parsed": service.metrics.packets_parsed,
-        "packets_invalid": service.metrics.packets_invalid,
-    }
+    with service._state_lock:
+        return {
+            "features": dict(service.pipeline.last_features),
+            "packets_parsed": service.metrics.packets_parsed,
+            "packets_invalid": service.metrics.packets_invalid,
+            "node_distribution": service.recorder.node_distribution(),
+        }
+
+
+@app.get("/api/nodes")
+def get_nodes() -> dict[int, dict[str, object]]:
+    assert service is not None
+    with service._state_lock:
+        return {
+            node_id: {
+                "packets": stats.packets,
+                "last_seq": stats.last_seq,
+                "dropped_estimate": stats.dropped_estimate,
+                "last_seen_time": stats.last_seen_time,
+            }
+            for node_id, stats in service.metrics.node_stats.items()
+        }
 
 
 @app.websocket("/ws/live")
@@ -156,17 +219,29 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--udp-port", type=int, default=3334)
     parser.add_argument("--session-dir", default="data/sessions")
+    parser.add_argument("--window-size", type=int, default=40)
+    parser.add_argument("--max-frames", type=int, default=12000)
     args = parser.parse_args()
 
     global service
-    service = CSIIngestService(args.udp_port, Path(args.session_dir))
-    th = threading.Thread(target=service.run_udp_listener, daemon=True)
-    th.start()
+    service = CSIIngestService(
+        udp_port=args.udp_port,
+        session_dir=Path(args.session_dir),
+        window_size=args.window_size,
+        max_frames=args.max_frames,
+    )
+    service.start()
 
+    artifacts: dict[str, str] = {}
     try:
         uvicorn.run(app, host=args.bind, port=args.port)
     finally:
-        service.stop()
+        artifacts = service.stop()
+
+    if artifacts:
+        print("Saved session artifacts:")
+        for name, path in artifacts.items():
+            print(f"  {name}: {path}")
 
 
 if __name__ == "__main__":
