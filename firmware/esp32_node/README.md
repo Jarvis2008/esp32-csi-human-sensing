@@ -25,5 +25,12 @@ idf.py set-target esp32
 idf.py -p /dev/cu.usbserial-0001 build flash monitor
 ```
 
+## Stable Flash (if serial drops during flash)
+Use the bundled helper to flash at a conservative baud:
+```bash
+cd firmware/esp32_node
+./flash_safe.sh /dev/cu.usbserial-0001
+```
+
 ## Packet Contract
 See `data/contracts/csi_frame_v2.md` in the repo root.
