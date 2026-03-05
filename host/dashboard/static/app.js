@@ -15,6 +15,8 @@ const elements = {
   nodeList: document.getElementById("nodeList"),
   motionCanvas: document.getElementById("motionChart"),
   confidenceCanvas: document.getElementById("confidenceChart"),
+  activeLabel: document.getElementById("activeLabel"),
+  labelButtons: Array.from(document.querySelectorAll("#labelButtons .label-btn")),
 };
 
 function setBadge(kind, text) {
@@ -76,10 +78,49 @@ function drawSeries(canvas, series, color, maxFallback = 1) {
   ctx.stroke();
 }
 
+function setActiveLabelDisplay(label) {
+  const normalized = label || "unlabeled";
+  elements.activeLabel.textContent = normalized;
+  elements.labelButtons.forEach((btn) => {
+    if (btn.dataset.label === normalized) {
+      btn.classList.add("is-active");
+    } else {
+      btn.classList.remove("is-active");
+    }
+  });
+}
+
+async function setLabel(label) {
+  try {
+    const res = await fetch("/api/labels/current", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label }),
+    });
+    if (!res.ok) return;
+    const payload = await res.json();
+    setActiveLabelDisplay(payload.active_label || label);
+  } catch (_err) {
+    // ignore and keep old label
+  }
+}
+
+async function loadLabelState() {
+  try {
+    const res = await fetch("/api/labels");
+    if (!res.ok) return;
+    const payload = await res.json();
+    setActiveLabelDisplay(payload.active_label || "unlabeled");
+  } catch (_err) {
+    // ignore and keep defaults
+  }
+}
+
 function updateFromPayload(payload) {
   const state = payload.state || {};
   const metrics = payload.metrics || {};
   const features = payload.features || {};
+  const labeling = payload.labeling || {};
 
   elements.presence.textContent = state.presence || "unknown";
   elements.activity.textContent = state.activity || "unknown";
@@ -106,6 +147,8 @@ function updateFromPayload(payload) {
   } else {
     setBadge("badge-warn", "waiting-data");
   }
+
+  setActiveLabelDisplay(labeling.active_label || elements.activeLabel.textContent);
 }
 
 async function pollStatus() {
@@ -147,4 +190,8 @@ function connectWs() {
 
 setInterval(pollStatus, 3000);
 pollStatus();
+loadLabelState();
+elements.labelButtons.forEach((btn) => {
+  btn.addEventListener("click", () => setLabel(btn.dataset.label || "unlabeled"));
+});
 connectWs();

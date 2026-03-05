@@ -5,7 +5,8 @@ Live browser dashboard for phase-1 CSI sensing.
 ## Entry Points
 - `/` -> dashboard index
 - `/dashboard/*` -> static assets
-- `/api/status`, `/api/state`, `/api/metrics`, `/api/nodes`
+- `/api/status`, `/api/state`, `/api/metrics`, `/api/nodes`, `/api/labels`
+- `POST /api/labels/current` -> set active capture label
 - `/ws/live`
 
 ## Run
@@ -20,3 +21,4 @@ Open: `http://localhost:8000`
 - Packet/parser health
 - Node-level counters
 - Motion/confidence trend charts
+- Labeling control for phase-2 dataset capture

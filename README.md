@@ -24,6 +24,19 @@ uv run python -m host.ingest.service --bind 0.0.0.0 --port 8000 --udp-port 3334
 uv run pytest -q tests/replay
 ```
 
+## Phase-2 Loop (Label -> Train -> Evaluate)
+```bash
+uv run python -m host.inference.export_labeled_windows \
+  --session-root data/sessions \
+  --output-csv data/sessions/features_labeled.csv
+
+uv run python -m host.inference.evaluate_activity_model \
+  --dataset-csv data/sessions/features_labeled.csv \
+  --output-model data/sessions/model_softmax.json \
+  --output-report data/sessions/eval_report_phase2.md \
+  --threshold-output data/sessions/thresholds.json
+```
+
 ## ESP-IDF Flow
 ```bash
 source /Users/jarvis/Work/esp-idf-v5.5.2/export.sh

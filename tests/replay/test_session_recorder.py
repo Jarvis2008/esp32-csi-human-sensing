@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import numpy as np
+
 from host.ingest.session import FrameSnapshot, SessionRecorder
 
 
@@ -15,18 +17,28 @@ def test_session_recorder_persists_artifacts(tmp_path: Path):
             csi_iq=(1, 2, 3, 4),
         )
     )
-    rec.add_feature_window({"amp_mean": 1.2, "motion_index": 0.4})
+    rec.add_feature_window(
+        {"amp_mean": 1.2, "motion_index": 0.4},
+        timestamp_us=123,
+        label="walking",
+    )
 
     out = rec.persist(
         session_dir=tmp_path,
         metrics={"packets_parsed": 1},
         last_state={"presence": "occupied", "activity": "walking", "confidence": 0.7},
+        label_events=[{"label": "walking", "event_time_s": 1.0}],
     )
 
+    assert Path(out["session_dir"]).exists()
     assert Path(out["raw_frames"]).exists()
     assert Path(out["window_features"]).exists()
     assert Path(out["labels"]).exists()
     assert Path(out["eval_report"]).exists()
+
+    features = np.load(out["window_features"], allow_pickle=True)
+    assert features["label"].tolist() == ["walking"]
+    assert features["timestamp_us"].tolist() == [123]
 
 
 def test_node_distribution_counts():

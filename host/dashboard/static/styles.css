@@ -155,6 +155,36 @@ h1 {
   color: #c2d4e2;
 }
 
+.label-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0 8px;
+}
+
+.label-btn {
+  border: 1px solid var(--panel-border);
+  background: rgba(10, 18, 24, 0.9);
+  color: #c6d8e6;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.85rem;
+  border-radius: 8px;
+  padding: 8px 6px;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+.label-btn:hover {
+  border-color: rgba(79, 209, 197, 0.5);
+  color: var(--text);
+}
+
+.label-btn.is-active {
+  border-color: rgba(79, 209, 197, 0.8);
+  background: rgba(79, 209, 197, 0.12);
+  color: var(--accent);
+}
+
 .chart-card canvas {
   width: 100%;
   height: auto;

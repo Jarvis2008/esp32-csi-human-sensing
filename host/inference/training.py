@@ -19,6 +19,12 @@ class TrainedSoftmaxModel:
     bias: np.ndarray
 
 
+def _sanitize_features(x: np.ndarray) -> np.ndarray:
+    clean = np.asarray(x, dtype=np.float32)
+    clean = np.nan_to_num(clean, nan=0.0, posinf=1e6, neginf=-1e6)
+    return np.clip(clean, -1e6, 1e6)
+
+
 def _softmax(logits: np.ndarray) -> np.ndarray:
     shifted = logits - np.max(logits, axis=1, keepdims=True)
     exp = np.exp(shifted)
@@ -34,13 +40,14 @@ def train_softmax_classifier(
     learning_rate: float = 0.1,
     l2: float = 1e-4,
 ) -> TrainedSoftmaxModel:
+    x = _sanitize_features(x)
     n_samples, n_features = x.shape
     n_classes = len(class_names)
 
     mean = x.mean(axis=0)
     std = x.std(axis=0)
     std[std < 1e-6] = 1.0
-    x_norm = (x - mean) / std
+    x_norm = np.clip((x - mean) / std, -50.0, 50.0)
 
     rng = np.random.default_rng(7)
     weights = rng.normal(scale=0.05, size=(n_features, n_classes)).astype(np.float32)
@@ -50,7 +57,10 @@ def train_softmax_classifier(
     y_onehot[np.arange(n_samples), y_idx] = 1.0
 
     for _ in range(epochs):
-        logits = x_norm @ weights + bias
+        with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+            logits = x_norm @ weights + bias
+        logits = np.nan_to_num(logits, nan=0.0, posinf=60.0, neginf=-60.0)
+        logits = np.clip(logits, -60.0, 60.0)
         probs = _softmax(logits)
         err = probs - y_onehot
 
@@ -59,6 +69,8 @@ def train_softmax_classifier(
 
         weights -= learning_rate * grad_w
         bias -= learning_rate * grad_b
+        weights = np.clip(weights, -10.0, 10.0)
+        bias = np.clip(bias, -10.0, 10.0)
 
     return TrainedSoftmaxModel(
         feature_names=feature_names,
@@ -71,8 +83,12 @@ def train_softmax_classifier(
 
 
 def predict_with_softmax(model: TrainedSoftmaxModel, x: np.ndarray) -> np.ndarray:
-    x_norm = (x - model.mean) / model.std
-    logits = x_norm @ model.weights + model.bias
+    x = _sanitize_features(x)
+    x_norm = np.clip((x - model.mean) / model.std, -50.0, 50.0)
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        logits = x_norm @ model.weights + model.bias
+    logits = np.nan_to_num(logits, nan=0.0, posinf=60.0, neginf=-60.0)
+    logits = np.clip(logits, -60.0, 60.0)
     return _softmax(logits)
 
 

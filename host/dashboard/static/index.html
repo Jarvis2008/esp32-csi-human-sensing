@@ -51,6 +51,23 @@
           <h2>Node Summary</h2>
           <div id="nodeList" class="node-list mono">No node packets yet.</div>
         </article>
+
+        <article class="card">
+          <h2>Labeling</h2>
+          <div class="state-row">
+            <span class="label">Active label</span>
+            <span id="activeLabel" class="pill">unlabeled</span>
+          </div>
+          <div id="labelButtons" class="label-grid">
+            <button type="button" class="label-btn is-active" data-label="unlabeled">unlabeled</button>
+            <button type="button" class="label-btn" data-label="empty">empty</button>
+            <button type="button" class="label-btn" data-label="stationary">stationary</button>
+            <button type="button" class="label-btn" data-label="walking">walking</button>
+            <button type="button" class="label-btn" data-label="gesture">gesture</button>
+            <button type="button" class="label-btn" data-label="fall_like">fall_like</button>
+          </div>
+          <p class="subtitle">Use these controls during recording to tag activity windows in real time.</p>
+        </article>
       </section>
 
       <section class="charts">

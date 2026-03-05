@@ -1,4 +1,4 @@
-"""UDP ingest + REST/WS service for CSI phase 1."""
+"""UDP ingest + REST/WS service for CSI phase 1/2."""
 
 from __future__ import annotations
 
@@ -9,16 +9,26 @@ import socket
 import threading
 import time
 from pathlib import Path
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 import uvicorn
 
 from host.ingest.packet import FrameParseError, parse_csi_frame_v2
 from host.ingest.session import FrameSnapshot, SessionRecorder
 from host.ingest.state import RuntimeMetrics
 from host.inference.pipeline import InferencePipeline
+
+
+LABELS = ("unlabeled", "empty", "stationary", "walking", "gesture", "fall_like")
+
+
+class LabelUpdateRequest(BaseModel):
+    label: str
+    note: Optional[str] = None
 
 
 class CSIIngestService:
@@ -38,7 +48,45 @@ class CSIIngestService:
         self._clients: set[WebSocket] = set()
         self._state_lock = threading.Lock()
         self._last_state = {"presence": "unknown", "activity": "unknown", "confidence": 0.0}
+        self._active_label = "unlabeled"
+        self._label_events: list[dict[str, object]] = [
+            {
+                "label": "unlabeled",
+                "event_time_s": time.time(),
+                "note": "startup",
+            }
+        ]
         self._udp_thread: threading.Thread | None = None
+
+    def set_label(self, label: str, note: str | None = None) -> dict[str, object]:
+        if label not in LABELS:
+            raise ValueError(f"unsupported label '{label}'")
+
+        event = {
+            "label": label,
+            "event_time_s": time.time(),
+        }
+        cleaned_note = (note or "").strip()
+        if cleaned_note:
+            event["note"] = cleaned_note
+
+        with self._state_lock:
+            self._active_label = label
+            self._label_events.append(event)
+            return {
+                "active_label": self._active_label,
+                "label_events_count": len(self._label_events),
+                "last_event": dict(event),
+            }
+
+    def get_label_state(self) -> dict[str, object]:
+        with self._state_lock:
+            return {
+                "active_label": self._active_label,
+                "labels": list(LABELS),
+                "label_events_count": len(self._label_events),
+                "recent_events": self._label_events[-20:],
+            }
 
     def run_udp_listener(self) -> None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -80,7 +128,11 @@ class CSIIngestService:
 
                 state = self.pipeline.add_frame(frame.csi_iq)
                 if self.pipeline.last_features:
-                    self.recorder.add_feature_window(self.pipeline.last_features)
+                    self.recorder.add_feature_window(
+                        self.pipeline.last_features,
+                        timestamp_us=frame.timestamp_us,
+                        label=self._active_label,
+                    )
                 if state:
                     self._last_state = state
 
@@ -101,6 +153,10 @@ class CSIIngestService:
                         "error_rate": self.metrics.parser_error_rate(),
                     },
                     "features": self.pipeline.last_features,
+                    "labeling": {
+                        "active_label": self._active_label,
+                        "label_events_count": len(self._label_events),
+                    },
                     "nodes": {
                         node_id: {
                             "packets": stats.packets,
@@ -138,8 +194,20 @@ class CSIIngestService:
                 "error_rate": self.metrics.parser_error_rate(),
             }
             last_state = dict(self._last_state)
+            label_events = list(self._label_events)
+            metadata = {
+                "window_size": self.pipeline.window_size,
+                "sample_rate_hz": self.pipeline.sample_rate_hz,
+                "udp_port": self.udp_port,
+            }
 
-        return self.recorder.persist(self.session_dir, metrics_snapshot, last_state)
+        return self.recorder.persist(
+            self.session_dir,
+            metrics_snapshot,
+            last_state,
+            label_events=label_events,
+            metadata=metadata,
+        )
 
 
 service: CSIIngestService | None = None
@@ -190,6 +258,8 @@ def get_metrics() -> dict[str, object]:
             "packets_parsed": service.metrics.packets_parsed,
             "packets_invalid": service.metrics.packets_invalid,
             "node_distribution": service.recorder.node_distribution(),
+            "active_label": service._active_label,
+            "label_events_count": len(service._label_events),
         }
 
 
@@ -206,6 +276,21 @@ def get_nodes() -> dict[int, dict[str, object]]:
             }
             for node_id, stats in service.metrics.node_stats.items()
         }
+
+
+@app.get("/api/labels")
+def get_labels() -> dict[str, object]:
+    assert service is not None
+    return service.get_label_state()
+
+
+@app.post("/api/labels/current")
+def set_label(req: LabelUpdateRequest) -> dict[str, object]:
+    assert service is not None
+    try:
+        return service.set_label(req.label, req.note)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.websocket("/ws/live")
